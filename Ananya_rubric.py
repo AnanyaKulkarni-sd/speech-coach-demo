@@ -1,10 +1,8 @@
 """
 ANANYA'S MODULE
-Speech Coach — Rubric + Scoring + Improvement Graph + Feedback
+Speech Coach - Rubric + Scoring + Improvement Tracker + Feedback
 
-This file contains ONLY Ananya's assigned work.
-
-Responsibilities:
+This module contains only Ananya's assigned work:
 1. Total words count
 2. Filler words count
 3. Filler %
@@ -15,149 +13,110 @@ Responsibilities:
 8. Pausing
 9. Overall score
 10. SCORE-style rubric display
-11. Improvement Tracker bar chart
+11. Improvement Tracker chart
 12. Feedback
 
-This module does NOT:
-- record audio
-- convert audio to text
-- detect filler words from raw audio
-- build the complete website
-
-The other team members can pass their outputs into calculate_rubric().
-
-Example input:
-    transcript = "Um today I am going to explain AI. Basically AI is useful."
-    filler_words = ["Um", "Basically"]
-    duration_seconds = 12.5
-    volume_score = 78
-    pausing_score = 82
-
-The code can initially be tested with dummy data.
-Later, replace the dummy values with the outputs from Sinchana and Prakruthi.
+It does NOT record audio, transcribe audio, or detect filler words from raw audio.
+Those values are expected from the other team modules.
 """
-
+import textwrap
 import re
 from collections import Counter
 
 import streamlit as st
 
-
-# ============================================================
-# 1. COLOURS — inspired by the reference SCORE image
-# ============================================================
-
-COLORS = {
-    "words": "#E5A900",       # yellow/gold
-    "fillers": "#2A9D8F",     # green
-    "filler_pct": "#D83A2E",  # red
-    "duration": "#2E5D8E",    # dark blue
-    "repeated": "#55A9BF",    # light blue
-    "pace": "#E5A900",
-    "volume": "#2A9D8F",
-    "pausing": "#D83A2E",
-    "overall": "#2E5D8E",
-}
+try:
+    import altair as alt
+except ImportError:
+    alt = None
 
 
-# ============================================================
-# 2. HELPER FUNCTIONS
-# ============================================================
+# ---------------------------------------------------------------------
+# Basic helpers
+# ---------------------------------------------------------------------
 
 def tokenize_words(text):
-    """Return words from a transcript."""
+    """Return simple word tokens from a transcript."""
+    if not text:
+        return []
     return re.findall(r"\b[\w']+\b", text.lower())
 
 
 def count_words(text):
-    """Total number of words in the transcript."""
     return len(tokenize_words(text))
 
 
 def count_repeated_words(text):
     """
-    Count immediate repeated words.
-
-    Example:
-        'I I think this is is useful'
-    gives:
-        I, is
-        => 2 repetitions
+    Count immediate repeated words such as:
+    'I I think' -> 1
+    'the the presentation' -> 1
     """
     words = tokenize_words(text)
-
-    repetitions = []
+    repeated = []
 
     for i in range(1, len(words)):
-        if words[i] == words[i - 1] and len(words[i]) > 1:
-            repetitions.append(words[i])
+        if words[i] == words[i - 1]:
+            repeated.append(words[i])
 
-    return repetitions
+    return len(repeated), repeated
 
 
 def calculate_pace(total_words, duration_seconds):
-    """
-    Calculate speaking pace in words per minute.
+    """Words per minute."""
+    if not duration_seconds or duration_seconds <= 0:
+        return 0.0
 
-    Returns None when duration is unavailable.
-    """
-    if duration_seconds is None or duration_seconds <= 0:
-        return None
-
-    return total_words / (duration_seconds / 60)
+    return round(total_words / (duration_seconds / 60), 1)
 
 
-def calculate_pace_score(wpm):
+def calculate_pace_score(pace_wpm):
     """
     Prototype pace score.
-
-    Around 145 WPM is used as the centre of the scoring range.
-    This is a project heuristic, NOT a medically/academically validated score.
+    Around 130-160 WPM is treated as the target range.
     """
-    if wpm is None:
-        return None
+    if pace_wpm <= 0:
+        return 0.0
 
-    difference = abs(wpm - 145)
+    if 130 <= pace_wpm <= 160:
+        return 100.0
 
-    if difference <= 20:
-        return 100
+    if pace_wpm < 130:
+        score = 100 - (130 - pace_wpm) * 1.0
+    else:
+        score = 100 - (pace_wpm - 160) * 1.0
 
-    score = 100 - ((difference - 20) * 1.2)
-
-    return round(max(0, min(100, score)))
+    return round(max(0, min(100, score)), 1)
 
 
 def calculate_filler_score(filler_percentage):
-    """Convert filler percentage into a 0–100 quality score."""
-    score = 100 - (filler_percentage * 8)
-    return round(max(0, min(100, score)))
+    """Lower filler percentage gives a higher score."""
+    score = 100 - (filler_percentage * 5)
+    return round(max(0, min(100, score)), 1)
 
 
-def calculate_repetition_score(repetition_count, total_words):
-    """Convert repeated-word frequency into a 0–100 quality score."""
+def calculate_repetition_score(repeated_count, total_words):
+    """Lower immediate repetition gives a higher score."""
     if total_words <= 0:
-        return None
+        return 100.0
 
-    repetition_rate = repetition_count / total_words * 100
-    score = 100 - (repetition_rate * 7)
+    repetition_percentage = (repeated_count / total_words) * 100
+    score = 100 - (repetition_percentage * 5)
 
-    return round(max(0, min(100, score)))
+    return round(max(0, min(100, score)), 1)
 
 
 def format_duration(seconds):
-    """Format seconds as MM:SS."""
-    if seconds is None:
-        return "Not available"
-
-    seconds = int(round(seconds))
-    minutes, seconds = divmod(seconds, 60)
-
-    return f"{minutes:02d}:{seconds:02d}"
+    """Convert seconds into a readable duration."""
+    seconds = max(0, int(seconds or 0))
+    minutes = seconds // 60
+    remaining_seconds = seconds % 60
+    return f"{minutes:02d}:{remaining_seconds:02d}"
 
 
-# ============================================================
-# 3. MAIN RUBRIC CALCULATION
-# ============================================================
+# ---------------------------------------------------------------------
+# Main scoring
+# ---------------------------------------------------------------------
 
 def calculate_rubric(
     transcript,
@@ -167,694 +126,616 @@ def calculate_rubric(
     pausing_score=None,
 ):
     """
-    Calculate Ananya's complete speech rubric.
+    Calculate Ananya's rubric.
 
-    Parameters
-    ----------
-    transcript : str
-        Transcript produced by Sinchana's speech-to-text module.
+    filler_words:
+        Can be a list such as ["um", "like", "uh"].
+        These values come from Prakruthi's filler-word module.
 
-    filler_words : list
-        Filler words identified by Prakruthi's module.
-        Example: ["um", "basically", "you know"]
+    duration_seconds:
+        Comes from the audio/speech analysis module.
 
-    duration_seconds : float
-        Speech duration supplied by the audio/transcription module.
-
-    volume_score : float
-        0–100 volume score supplied by the audio analysis module.
-        Ananya does NOT calculate raw audio volume.
-
-    pausing_score : float
-        0–100 pausing score supplied by the audio analysis module.
-        Ananya does NOT calculate raw audio pauses.
-
-    Returns
-    -------
-    dict
-        All nine requested rubric factors plus scores and feedback.
+    volume_score / pausing_score:
+        Scores from 0-100 supplied by the audio analysis module.
     """
 
-    if not isinstance(transcript, str):
-        raise TypeError("transcript must be a string.")
-
+    transcript = transcript or ""
     filler_words = filler_words or []
 
-    # --------------------------------------------------------
-    # Total words
-    # --------------------------------------------------------
     total_words = count_words(transcript)
 
-    # --------------------------------------------------------
-    # Filler words
-    # --------------------------------------------------------
-    filler_count = len(filler_words)
+    # Count filler words supplied by the filler-word module.
+    transcript_words = tokenize_words(transcript)
+    normalized_fillers = [str(word).lower().strip() for word in filler_words]
+
+    filler_count = sum(
+        1 for word in transcript_words if word in normalized_fillers
+    )
 
     filler_percentage = (
-        (filler_count / total_words) * 100
-        if total_words > 0
-        else 0
+        round((filler_count / total_words) * 100, 1)
+        if total_words
+        else 0.0
     )
 
+    duration_seconds = float(duration_seconds or 0)
+
+    repeated_count, repeated_words = count_repeated_words(transcript)
+
+    pace_wpm = calculate_pace(total_words, duration_seconds)
+
+    # Values received from other modules.
+    volume_score = (
+        75.0 if volume_score is None
+        else float(max(0, min(100, volume_score)))
+    )
+
+    pausing_score = (
+        75.0 if pausing_score is None
+        else float(max(0, min(100, pausing_score)))
+    )
+
+    # Internal quality scores.
     filler_score = calculate_filler_score(filler_percentage)
-
-    # --------------------------------------------------------
-    # Repeated words
-    # --------------------------------------------------------
-    repeated_words = count_repeated_words(transcript)
-    repeated_count = len(repeated_words)
-
     repetition_score = calculate_repetition_score(
         repeated_count,
-        total_words,
+        total_words
     )
-
-    # --------------------------------------------------------
-    # Speaking pace
-    # --------------------------------------------------------
-    pace_wpm = calculate_pace(
-        total_words,
-        duration_seconds,
-    )
-
     pace_score = calculate_pace_score(pace_wpm)
 
-    # --------------------------------------------------------
-    # Volume / pausing
-    # These values come from audio analysis done elsewhere.
-    # --------------------------------------------------------
-    if volume_score is not None:
-        volume_score = round(max(0, min(100, volume_score)))
-
-    if pausing_score is not None:
-        pausing_score = round(max(0, min(100, pausing_score)))
-
-    # --------------------------------------------------------
-    # Overall
-    # Only quality-oriented scores are averaged.
-    # Raw word count and duration are measurements, not quality
-    # scores, so they are NOT included in the overall calculation.
-    # --------------------------------------------------------
-    quality_scores = [
-        filler_score,
-        repetition_score,
-        pace_score,
-        volume_score,
-        pausing_score,
-    ]
-
-    quality_scores = [
-        score for score in quality_scores
-        if score is not None
-    ]
-
-    overall = (
-        round(sum(quality_scores) / len(quality_scores))
-        if quality_scores
-        else None
+    # Overall combines the quality-oriented factors.
+    overall = round(
+        (
+            filler_score
+            + repetition_score
+            + pace_score
+            + volume_score
+            + pausing_score
+        ) / 5,
+        1,
     )
 
     return {
-        # Requested measurements
         "total_words": total_words,
         "filler_count": filler_count,
-        "filler_percentage": round(filler_percentage, 2),
+        "filler_percentage": filler_percentage,
         "duration_seconds": duration_seconds,
         "repeated_count": repeated_count,
         "repeated_words": repeated_words,
-        "pace_wpm": round(pace_wpm, 1) if pace_wpm is not None else None,
-        "volume_score": volume_score,
-        "pausing_score": pausing_score,
-        "overall": overall,
-
-        # Internal quality scores used for the graph
+        "pace_wpm": pace_wpm,
+        "volume_score": round(volume_score, 1),
+        "pausing_score": round(pausing_score, 1),
         "filler_score": filler_score,
         "repetition_score": repetition_score,
         "pace_score": pace_score,
+        "overall": overall,
     }
 
 
-# ============================================================
-# 4. FEEDBACK
-# ============================================================
+# ---------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------
 
 def generate_feedback(result):
-    """Generate readable feedback from the rubric."""
+    """Generate simple, readable feedback from the rubric."""
 
     feedback = []
 
-    # Filler feedback
-    if result["filler_count"] == 0:
-        feedback.append(
-            (
-                "Filler words",
-                "No filler words were detected. Keep maintaining this level of clarity."
-            )
+    filler_count = result["filler_count"]
+    filler_percentage = result["filler_percentage"]
+
+    if filler_percentage <= 3:
+        filler_text = (
+            f"Filler words are well controlled: {filler_count} "
+            f"({filler_percentage}%)."
         )
-    elif result["filler_percentage"] <= 5:
-        feedback.append(
-            (
-                "Filler words",
-                f"You used {result['filler_count']} filler word(s), "
-                f"which is {result['filler_percentage']:.1f}% of your words. "
-                "This is a relatively small proportion; continue replacing fillers "
-                "with short pauses where possible."
-            )
+    elif filler_percentage <= 7:
+        filler_text = (
+            f"You used {filler_count} filler word(s), "
+            f"which is {filler_percentage}% of your words. "
+            "Try replacing hesitation words with short pauses."
         )
     else:
-        feedback.append(
-            (
-                "Filler words",
-                f"You used {result['filler_count']} filler word(s), "
-                f"which is {result['filler_percentage']:.1f}% of your words. "
-                "Try pausing briefly instead of using repeated hesitation words."
-            )
+        filler_text = (
+            f"You used {filler_count} filler word(s), "
+            f"which is {filler_percentage}% of your words. "
+            "Focus on pausing briefly instead of using filler words."
         )
 
-    # Repetition feedback
+    feedback.append(("Filler words", filler_text))
+
     if result["repeated_count"] == 0:
-        feedback.append(
-            (
-                "Repeated words",
-                "No immediate repeated words were detected."
-            )
-        )
+        repetition_text = "No immediate repeated words were detected."
     else:
-        words = ", ".join(result["repeated_words"])
-        feedback.append(
-            (
-                "Repeated words",
-                f"{result['repeated_count']} immediate repetition(s) were detected"
-                f" ({words}). Try pausing briefly before restarting a sentence."
-            )
+        repeated = ", ".join(result["repeated_words"][:6])
+        repetition_text = (
+            f"{result['repeated_count']} immediate repetition(s) detected"
+            f" ({repeated}). Try to slow down slightly between ideas."
         )
 
-    # Pace feedback
+    feedback.append(("Repeated words", repetition_text))
+
     pace = result["pace_wpm"]
 
-    if pace is None:
-        feedback.append(
-            (
-                "Pace",
-                "Speaking pace could not be calculated because duration was not provided."
-            )
-        )
+    if pace == 0:
+        pace_text = "Speaking pace could not be calculated yet."
     elif pace < 110:
-        feedback.append(
-            (
-                "Pace",
-                f"Your pace is approximately {pace:.0f} WPM. "
-                "You may be speaking slowly; consider slightly increasing your pace "
-                "while keeping your words clear."
-            )
+        pace_text = (
+            f"Your pace is approximately {pace} WPM. "
+            "Consider increasing your pace slightly while keeping your words clear."
         )
     elif pace > 180:
-        feedback.append(
-            (
-                "Pace",
-                f"Your pace is approximately {pace:.0f} WPM. "
-                "Consider slowing down and adding intentional pauses between ideas."
-            )
+        pace_text = (
+            f"Your pace is approximately {pace} WPM. "
+            "Try slowing down slightly so important ideas are easier to follow."
         )
     else:
-        feedback.append(
-            (
-                "Pace",
-                f"Your pace is approximately {pace:.0f} WPM. "
-                "Use natural pauses to maintain clarity and listener comfort."
-            )
+        pace_text = (
+            f"Your pace is approximately {pace} WPM, "
+            "which is within a practical presentation range."
         )
 
-    # Volume feedback
-    if result["volume_score"] is None:
-        feedback.append(
-            (
-                "Volume",
-                "Volume data is not available yet. It will be supplied by the audio-analysis module."
-            )
-        )
-    elif result["volume_score"] >= 80:
-        feedback.append(
-            (
-                "Volume",
-                "Your volume score is strong. Keep your microphone distance consistent."
-            )
-        )
-    elif result["volume_score"] >= 60:
-        feedback.append(
-            (
-                "Volume",
-                "Your volume is usable, but try to keep your loudness more consistent."
-            )
+    feedback.append(("Pace", pace_text))
+
+    volume = result["volume_score"]
+
+    if volume >= 80:
+        volume_text = "Your volume score is strong and should be easy to hear."
+    elif volume >= 60:
+        volume_text = (
+            "Your volume is usable, but try to keep your loudness more consistent."
         )
     else:
-        feedback.append(
-            (
-                "Volume",
-                "Your volume score suggests that delivery volume may need improvement. "
-                "Speak clearly and keep a consistent distance from the microphone."
-            )
+        volume_text = (
+            "Your volume score is low. Try speaking more clearly and consistently."
         )
 
-    # Pausing feedback
-    if result["pausing_score"] is None:
-        feedback.append(
-            (
-                "Pausing",
-                "Pausing data is not available yet. It will be supplied by the audio-analysis module."
-            )
+    feedback.append(("Volume", volume_text))
+
+    pausing = result["pausing_score"]
+
+    if pausing >= 80:
+        pausing_text = (
+            "Your pausing score is strong. Continue using pauses to separate ideas."
         )
-    elif result["pausing_score"] >= 80:
-        feedback.append(
-            (
-                "Pausing",
-                "Your pausing score is strong. Continue using pauses to separate ideas."
-            )
-        )
-    elif result["pausing_score"] >= 60:
-        feedback.append(
-            (
-                "Pausing",
-                "Your pauses are usable. Try making pauses more intentional at major transitions."
-            )
+    elif pausing >= 60:
+        pausing_text = (
+            "Your pausing is reasonable. Add short pauses between important ideas."
         )
     else:
-        feedback.append(
-            (
-                "Pausing",
-                "Work on using intentional pauses between ideas instead of rushing through sentences."
-            )
+        pausing_text = (
+            "Try using more intentional pauses instead of speaking continuously."
         )
+
+    feedback.append(("Pausing", pausing_text))
+
+    overall = result["overall"]
+
+    if overall >= 80:
+        overall_text = (
+            f"Overall score: {overall}/100. Your speech shows strong overall control."
+        )
+    elif overall >= 60:
+        overall_text = (
+            f"Overall score: {overall}/100. "
+            "You have a solid base; focus on the lower-scoring areas."
+        )
+    else:
+        overall_text = (
+            f"Overall score: {overall}/100. "
+            "Focus on one or two speech factors at a time and improve gradually."
+        )
+
+    feedback.append(("Overall", overall_text))
 
     return feedback
 
 
-# ============================================================
-# 5. SCORE-STYLE CSS
-# ============================================================
+# ---------------------------------------------------------------------
+# Styling
+# ---------------------------------------------------------------------
 
 def load_score_styles():
-    """Load the visual style inspired by the supplied SCORE image."""
+    """Load the visual styling for Ananya's section."""
 
     st.markdown(
         """
         <style>
+        .ananya-wrapper {
+            font-family: "Inter", "Segoe UI", Arial, sans-serif;
+        }
 
-        .score-container {
-            background: #ffffff;
-            border: 1px solid #e3e4e6;
-            border-radius: 18px;
-            padding: 18px 28px 22px 28px;
-            margin-top: 10px;
+        .score-header {
+            margin-top: 8px;
+            margin-bottom: 26px;
         }
 
         .score-title {
-            text-align: center;
-            font-size: 28px;
-            font-weight: 800;
-            color: #333333;
-            margin-bottom: 4px;
+            font-family: "Georgia", "Times New Roman", serif;
+            font-size: 36px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            color: #202124;
+            margin-bottom: 6px;
         }
 
         .score-subtitle {
-            text-align: center;
-            color: #777777;
-            font-size: 13px;
-            margin: 0 auto 12px auto;
-            max-width: 720px;
+            font-family: "Inter", "Segoe UI", Arial, sans-serif;
+            font-size: 16px;
+            color: #6b7280;
+            margin-bottom: 18px;
         }
 
-        .score-spectrum {
-            width: 290px;
-            height: 4px;
-            margin: 10px auto 20px auto;
-            background: linear-gradient(
-                to right,
-                #E5A900 0%,
-                #E5A900 20%,
-                #2A9D8F 20%,
-                #2A9D8F 40%,
-                #D83A2E 40%,
-                #D83A2E 60%,
-                #2E5D8E 60%,
-                #2E5D8E 80%,
-                #55A9BF 80%,
-                #55A9BF 100%
-            );
+        .score-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 16px;
+            padding: 20px 22px;
+            margin-bottom: 24px;
+            background: #ffffff;
+            box-shadow: 0 3px 14px rgba(15, 23, 42, 0.05);
         }
 
         .score-row {
             display: grid;
-            grid-template-columns: 62px 115px 1fr 90px;
+            grid-template-columns: 48px 180px 1fr 72px;
+            gap: 16px;
             align-items: center;
-            column-gap: 14px;
-            min-height: 72px;
-            padding: 6px 0;
+            margin: 16px 0;
         }
 
-        .score-circle {
-            width: 48px;
-            height: 48px;
+        .score-badge {
+            width: 42px;
+            height: 42px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: white;
-            font-size: 17px;
             font-weight: 800;
-            border: 2px solid white;
-            box-shadow: 0 0 0 2px var(--circle-color);
+            font-size: 14px;
+            color: #ffffff;
         }
 
-        .score-name {
-            font-size: 13px;
-            font-weight: 800;
+        .score-label {
+            font-size: 15px;
+            font-weight: 650;
+            color: #252a34;
         }
 
-        .score-description {
-            color: #8a8a8a;
-            font-size: 10px;
-            line-height: 1.25;
-            margin-bottom: 7px;
+        .score-value {
+            text-align: right;
+            font-size: 15px;
+            font-weight: 750;
+            color: #252a34;
         }
 
-        .score-track {
-            height: 7px;
-            background: #d7d7d7;
-            border-radius: 10px;
+        .score-progress {
+            height: 9px;
+            width: 100%;
+            background: #eef1f5;
+            border-radius: 999px;
             overflow: hidden;
         }
 
-        .score-fill {
+        .score-progress-fill {
             height: 100%;
-            border-radius: 10px;
+            border-radius: 999px;
         }
 
-        .score-number {
-            text-align: right;
-            font-size: 12px;
-            font-weight: 800;
-            color: #444444;
+        .section-title {
+            font-family: "Georgia", "Times New Roman", serif;
+            font-size: 30px;
+            font-weight: 700;
+            color: #202124;
+            margin-top: 12px;
+            margin-bottom: 6px;
         }
 
-        .feedback-box {
+        .section-subtitle {
+            font-size: 15px;
+            color: #6b7280;
+            margin-bottom: 16px;
+        }
+
+        .feedback-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            padding: 18px 20px;
+            margin: 12px 0;
             background: #ffffff;
-            border: 1px solid #e3e4e6;
-            border-radius: 13px;
-            padding: 15px 18px;
-            margin: 7px 0;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
         }
 
         .feedback-title {
-            font-weight: 800;
-            color: #333333;
-            margin-bottom: 4px;
+            font-size: 16px;
+            font-weight: 750;
+            color: #202124;
+            margin-bottom: 7px;
         }
 
         .feedback-text {
-            color: #666666;
-            line-height: 1.45;
+            font-size: 15px;
+            line-height: 1.55;
+            color: #60656f;
         }
 
         @media (max-width: 750px) {
-            .score-container {
-                padding: 12px;
-            }
-
             .score-row {
-                grid-template-columns: 48px 95px 1fr 65px;
-                column-gap: 8px;
+                grid-template-columns: 42px 1fr 65px;
             }
 
-            .score-description {
-                font-size: 9px;
+            .score-row .progress-column {
+                grid-column: 2 / 4;
+            }
+
+            .score-title {
+                font-size: 30px;
             }
         }
-
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-# ============================================================
-# 6. SCORE-STYLE RUBRIC DISPLAY
-# ============================================================
+# ---------------------------------------------------------------------
+# SCORE rubric display
+# ---------------------------------------------------------------------
+
+def _score_row(letter, label, value_text, score, color):
+    """Render one SCORE-style rubric row."""
+
+    score = max(0, min(100, float(score)))
+
+    st.markdown(f"""<div class="score-row">
+    <div class="score-badge" style="background:{color};">
+        {letter}
+    </div>
+    <div class="score-label">
+        {label}
+    </div>
+    <div class="progress-container">
+        <div class="progress-bar">
+            <div class="progress-fill" style="width:{score}%; background:{color};"></div>
+        </div>
+    </div>
+    <div class="score-value">
+        {value_text}
+    </div>
+</div>""", unsafe_allow_html=True)
 
 def render_score_rubric(result):
-    """
-    Display the nine requested rubric factors in the style
-    of the supplied SCORE Framework reference image.
-    """
-
-    load_score_styles()
-
-    def add_row(letter, name, description, score, color, display_value):
-        if score is None:
-            width = 0
-        else:
-            width = max(0, min(100, float(score)))
-
-        st.markdown(
-            f"""
-            <div class="score-row">
-
-                <div>
-                    <div class="score-circle"
-                         style="background:{color}; --circle-color:{color};">
-                        {letter}
-                    </div>
-                </div>
-
-                <div>
-                    <div class="score-name" style="color:{color};">
-                        {name}
-                    </div>
-                </div>
-
-                <div>
-                    <div class="score-description">
-                        {description}
-                    </div>
-
-                    <div class="score-track">
-                        <div class="score-fill"
-                             style="width:{width}%; background:{color};">
-                        </div>
-                    </div>
-                </div>
-
-                <div class="score-number">
-                    {display_value}
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    """Render the complete nine-factor rubric."""
 
     st.markdown(
-        """
-        <div class="score-container">
-
-            <div class="score-title">
-                The Speech SCORE Framework
-            </div>
-
+       textwrap.dedent ("""
+        <div class="score-header">
+            <div class="score-title">The Speech SCORE Framework</div>
             <div class="score-subtitle">
                 Speech performance rubric based on the nine project requirements.
             </div>
-
-            <div class="score-spectrum"></div>
-        """,
+        </div>
+        """),
         unsafe_allow_html=True,
     )
 
-    # 1. Total words
-    # Word count is a measurement, so the bar is normalized to 100
-    # for display purposes only.
-    word_display_score = min(
-        100,
-        (result["total_words"] / 200) * 100
-    )
+    st.markdown('<div class="score-card">', unsafe_allow_html=True)
 
-    add_row(
+    _score_row(
         "W",
         "Total words",
-        "Total number of words detected in the transcript.",
-        word_display_score,
-        COLORS["words"],
         str(result["total_words"]),
+        min(result["total_words"], 100),
+        "#4F46E5",
     )
 
-    # 2. Filler count
-    add_row(
+    _score_row(
         "F",
         "Filler words",
-        "Number of filler words identified by the filler-analysis module.",
-        result["filler_score"],
-        COLORS["fillers"],
         str(result["filler_count"]),
+        result["filler_score"],
+        "#E11D48",
     )
 
-    # 3. Filler percentage
-    filler_quality = max(
-        0,
-        min(
-            100,
-            100 - (result["filler_percentage"] * 5)
-        )
-    )
-
-    add_row(
+    _score_row(
         "%",
         "Filler %",
-        "Percentage of total words classified as filler words.",
-        filler_quality,
-        COLORS["filler_pct"],
-        f'{result["filler_percentage"]:.1f}%',
+        f'{result["filler_percentage"]}%',
+        result["filler_score"],
+        "#DB2777",
     )
 
-    # 4. Duration
-    duration_score = 100 if result["duration_seconds"] is not None else None
+    duration_score = min(100, result["duration_seconds"] / 3)
 
-    add_row(
+    _score_row(
         "D",
         "Duration",
-        "Total speaking duration supplied by the audio/transcription module.",
-        duration_score,
-        COLORS["duration"],
         format_duration(result["duration_seconds"]),
+        duration_score,
+        "#7C3AED",
     )
 
-    # 5. Repeated words
-    add_row(
+    _score_row(
         "R",
         "Repeated words",
-        "Immediate repeated words found in the transcript.",
-        result["repetition_score"],
-        COLORS["repeated"],
         str(result["repeated_count"]),
+        result["repetition_score"],
+        "#0891B2",
     )
 
-    # 6. Pace
-    add_row(
+    _score_row(
         "P",
         "Pace",
-        "Speaking speed calculated as words per minute.",
+        f'{result["pace_wpm"]} WPM',
         result["pace_score"],
-        COLORS["pace"],
-        (
-            f'{result["pace_wpm"]:.0f} WPM'
-            if result["pace_wpm"] is not None
-            else "—"
-        ),
+        "#0284C7",
     )
 
-    # 7. Volume
-    add_row(
+    _score_row(
         "V",
         "Volume",
-        "Volume score supplied by the audio-analysis module.",
+        f'{result["volume_score"]}/100',
         result["volume_score"],
-        COLORS["volume"],
-        (
-            f'{result["volume_score"]}/100'
-            if result["volume_score"] is not None
-            else "—"
-        ),
+        "#16A34A",
     )
 
-    # 8. Pausing
-    add_row(
+    _score_row(
         "Pa",
         "Pausing",
-        "Pausing score supplied by the audio-analysis module.",
+        f'{result["pausing_score"]}/100',
         result["pausing_score"],
-        COLORS["pausing"],
-        (
-            f'{result["pausing_score"]}/100'
-            if result["pausing_score"] is not None
-            else "—"
-        ),
+        "#CA8A04",
     )
 
-    # 9. Overall
-    add_row(
+    _score_row(
         "O",
         "Overall",
-        "Average of the available quality-oriented speech scores.",
+        f'{result["overall"]}/100',
         result["overall"],
-        COLORS["overall"],
-        (
-            f'{result["overall"]}/100'
-            if result["overall"] is not None
-            else "—"
-        ),
+        "#EA580C",
     )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------
+# Improvement Tracker
+# ---------------------------------------------------------------------
+
+def get_improvement_tracker_data(result):
+    """
+    Return the quality-oriented factors used in the Improvement Tracker.
+
+    All values are normalized to 0-100 so the chart has one sensible scale.
+    """
+
+    return {
+        "Filler Control": result["filler_score"],
+        "Repetition Control": result["repetition_score"],
+        "Pace": result["pace_score"],
+        "Volume": result["volume_score"],
+        "Pausing": result["pausing_score"],
+        "Overall": result["overall"],
+    }
+
+
+def render_improvement_tracker(result):
+    """Render a clean, multi-colour 0-100 improvement chart."""
+
+    data = get_improvement_tracker_data(result)
 
     st.markdown(
         """
+        <div class="section-title">Improvement Tracker</div>
+        <div class="section-subtitle">
+            Quality scores across the main speech-performance factors.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    chart_data = [
+        {"Factor": factor, "Score": float(score)}
+        for factor, score in data.items()
+    ]
 
-# ============================================================
-# 7. IMPROVEMENT TRACKER — BAR CHART
-# ============================================================
+    if alt is not None:
+        chart = (
+            alt.Chart(alt.Data(values=chart_data))
+            .mark_bar(
+                cornerRadiusTopLeft=7,
+                cornerRadiusTopRight=7,
+                size=45,
+            )
+            .encode(
+                x=alt.X(
+                    "Factor:N",
+                    sort=list(data.keys()),
+                    axis=alt.Axis(
+                        title=None,
+                        labelAngle=-25,
+                        labelFont="Arial",
+                        labelFontSize=13,
+                        labelColor="#4B5563",
+                    ),
+                ),
+                y=alt.Y(
+                    "Score:Q",
+                    scale=alt.Scale(domain=[0, 100]),
+                    axis=alt.Axis(
+                        title="Score",
+                        titleFont="Arial",
+                        titleFontSize=13,
+                        labelFont="Arial",
+                        labelFontSize=12,
+                        labelColor="#6B7280",
+                        gridColor="#E5E7EB",
+                    ),
+                ),
+                color=alt.Color(
+                    "Factor:N",
+                    scale=alt.Scale(
+                        domain=list(data.keys()),
+                        range=[
+                            "#4F46E5",
+                            "#E11D48",
+                            "#0284C7",
+                            "#16A34A",
+                            "#CA8A04",
+                            "#EA580C",
+                        ],
+                    ),
+                    legend=None,
+                ),
+                tooltip=[
+                    alt.Tooltip("Factor:N", title="Factor"),
+                    alt.Tooltip("Score:Q", title="Score", format=".1f"),
+                ],
+            )
+            .properties(height=390)
+            .configure_view(strokeOpacity=0)
+            .configure_axis(
+                titleFont="Arial",
+                labelFont="Arial",
+            )
+        )
 
-def get_improvement_tracker_data(result):
-    """
-    Return the quality-oriented scores used by the improvement
-    tracker bar chart.
-    """
+        st.altair_chart(chart, use_container_width=True)
 
-    return {
-        "Filler control": result["filler_score"],
-        "Repetition control": result["repetition_score"] or 0,
-        "Pace": result["pace_score"] or 0,
-        "Volume": result["volume_score"] or 0,
-        "Pausing": result["pausing_score"] or 0,
-        "Overall": result["overall"] or 0,
-    }
-
-
-def render_improvement_tracker(result):
-    """Display the requested Improvement Tracker bar chart."""
-
-    st.subheader("📊 Improvement Tracker")
-
-    chart_data = get_improvement_tracker_data(result)
-
-    st.bar_chart(
-        chart_data,
-        height=380,
-        y_label="Score / 100",
-    )
+    else:
+        # Fallback if Altair is unavailable.
+        st.bar_chart(
+            chart_data,
+            x="Factor",
+            y="Score",
+            height=390,
+        )
 
     st.caption(
-        "Higher bars represent stronger scores for the corresponding "
-        "quality-oriented speech factor."
+        "Higher scores represent stronger performance for the corresponding speech factor."
     )
 
 
-# ============================================================
-# 8. FEEDBACK DISPLAY
-# ============================================================
+# ---------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------
 
 def render_feedback(result):
-    """Display feedback generated from the rubric."""
+    """Render clean feedback cards."""
 
-    st.subheader("💬 Feedback")
+    st.markdown(
+        """
+        <div class="section-title">Feedback</div>
+        <div class="section-subtitle">
+            Practical suggestions based on your speech-performance scores.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    feedback = generate_feedback(result)
-
-    for title, message in feedback:
+    for title, message in generate_feedback(result):
         st.markdown(
             f"""
-            <div class="feedback-box">
+            <div class="feedback-card">
                 <div class="feedback-title">{title}</div>
                 <div class="feedback-text">{message}</div>
             </div>
@@ -863,63 +744,52 @@ def render_feedback(result):
         )
 
 
-# ============================================================
-# 9. COMPLETE ANANYA COMPONENT
-# ============================================================
+# ---------------------------------------------------------------------
+# Main module renderer
+# ---------------------------------------------------------------------
 
 def render_ananya_module(result):
-    """
-    Render everything belonging to Ananya:
+    """Render Ananya's complete section."""
 
-    - Rubric
-    - Improvement Tracker
-    - Feedback
-    """
+    load_score_styles()
+
+    st.markdown('<div class="ananya-wrapper">', unsafe_allow_html=True)
 
     render_score_rubric(result)
 
-    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
 
     render_improvement_tracker(result)
 
-    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
 
     render_feedback(result)
 
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# ============================================================
-# 10. DUMMY DATA FOR HACKATHON DEVELOPMENT
-# ============================================================
+
+# ---------------------------------------------------------------------
+# Dummy data for testing
+# ---------------------------------------------------------------------
 
 DUMMY_DATA = {
     "transcript": (
-        "Um today I am going to explain artificial intelligence. "
-        "Basically artificial intelligence is changing the way we work. "
-        "I I think this technology is very useful."
+        "Today I want to explain our speech coach project. "
+        "It helps speakers improve clarity confidence and delivery. "
+        "Um, the system analyzes speech and gives useful feedback."
     ),
-
-    # This list will eventually come from Prakruthi's filler detector.
-    "filler_words": [
-        "Um",
-        "Basically",
-    ],
-
-    # This will eventually come from Sinchana/audio analysis.
-    "duration_seconds": 18.5,
-
-    # These are dummy values for now.
-    # Later they will come from the audio-analysis pipeline.
+    "filler_words": ["um", "uh", "like", "you know"],
+    "duration_seconds": 42,
     "volume_score": 78,
-    "pausing_score": 82,
+    "pausing_score": 86,
 }
 
 
-# ============================================================
-# 11. STANDALONE TEST MODE
-# ============================================================
+# ---------------------------------------------------------------------
+# Standalone testing
+# ---------------------------------------------------------------------
 
 if __name__ == "__main__":
-
     result = calculate_rubric(
         transcript=DUMMY_DATA["transcript"],
         filler_words=DUMMY_DATA["filler_words"],
@@ -928,22 +798,4 @@ if __name__ == "__main__":
         pausing_score=DUMMY_DATA["pausing_score"],
     )
 
-    st.set_page_config(
-        page_title="Ananya - Speech Rubric",
-        page_icon="📊",
-        layout="wide",
-    )
-
-    st.title("Ananya's Speech Rubric — Dummy Data")
-
-    st.write(
-        "This is a standalone test of the rubric, scoring, "
-        "improvement graph and feedback module."
-    )
-
     render_ananya_module(result)
-
-    st.divider()
-
-    st.subheader("🔧 Debug / Data passed to the module")
-    st.json(result)
