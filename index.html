@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech Coach</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-mic" aria-hidden="true">
+                <img src="{{ url_for('static', filename='mic.svg') }}" alt="">
+            </div>
+            <div class="logo">Speech Coach</div>
+        </div>
+
+        <div class="topbar-right">
+            <div class="tagline">Speak better. Present stronger.</div>
+            <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode">
+                <span id="themeIcon">☀</span>
+                <span id="themeLabel">Light</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="container">
+
+        <section class="hero">
+            <div>
+                <p class="eyebrow">AI SPEECH ANALYSIS</p>
+                <h1>Improve the way<br>you <span>speak.</span></h1>
+                <p class="hero-text">
+                    Upload or record your speech and get a clear breakdown
+                    of your delivery, filler words, pace, pauses and more.
+                </p>
+            </div>
+
+            <div class="upload-card analysis-box">
+                <div class="upload-icon">
+                    <img src="{{ url_for('static', filename='mic.svg') }}" alt="Microphone">
+                </div>
+                <h2>Analyze your speech</h2>
+                <p>Upload an audio file or record your speech to begin.</p>
+
+                <input id="audioInput" type="file" accept="audio/*" hidden>
+
+                <div class="action-row">
+                    <button class="primary-btn" onclick="chooseAudio()">Choose Audio</button>
+                    <button class="secondary-btn" id="recordButton" onclick="toggleRecording()">● Record</button>
+                </div>
+
+                <p id="fileName" class="file-name">No file selected</p>
+                <audio id="audioPreview" controls hidden></audio>
+
+                <button class="analyze-btn" onclick="analyzeSpeech()">
+                    Analyze Speech →
+                </button>
+
+                <p id="status" class="status"></p>
+            </div>
+        </section>
+
+        <section id="results" class="results" hidden>
+
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">YOUR RESULTS</p>
+                    <h2>Speech analysis</h2>
+                </div>
+                <div class="overall-badge"><span id="overallScore">--</span>/100<small>Overall</small></div>
+            </div>
+
+            <div class="metrics-grid">
+                <div class="metric-card analysis-box">
+                    <span>Total Words</span>
+                    <strong id="totalWords">--</strong>
+                </div>
+                <div class="metric-card analysis-box">
+                    <span>Filler Words</span>
+                    <strong id="fillerCount">--</strong>
+                </div>
+                <div class="metric-card analysis-box">
+                    <span>Filler %</span>
+                    <strong id="fillerPercentage">--</strong>
+                </div>
+                <div class="metric-card analysis-box">
+                    <span>Duration</span>
+                    <strong id="duration">--</strong>
+                </div>
+                <div class="metric-card analysis-box">
+                    <span>Repeated Words</span>
+                    <strong id="repeatedWords">--</strong>
+                </div>
+                <div class="metric-card analysis-box">
+                    <span>Pace</span>
+                    <strong id="pace">--</strong>
+                    <small>words/min</small>
+                </div>
+                <div class="metric-card analysis-box">
+                    <span>Volume</span>
+                    <strong id="volume">--</strong>
+                    <small>/100</small>
+                </div>
+                <div class="metric-card analysis-box">
+                    <span>Pausing</span>
+                    <strong id="pausing">--</strong>
+                    <small>/100</small>
+                </div>
+            </div>
+
+            <div class="dashboard-grid">
+                <div class="panel analysis-box transcript-panel">
+                    <div class="panel-title">
+                        <div>
+                            <p class="eyebrow">TRANSCRIPT</p>
+                            <h3>Your speech</h3>
+                        </div>
+                        <span class="legend">🟡 Filler word</span>
+                    </div>
+                    <div id="transcript" class="transcript"></div>
+                </div>
+
+                <div class="panel analysis-box delivery-panel">
+                    <div class="panel-title">
+                        <div>
+                            <p class="eyebrow">IMPROVEMENT TRACKER</p>
+                            <h3>Delivery factors</h3>
+                        </div>
+                    </div>
+
+                    <div class="factor-grid">
+                        <div class="factor-card">
+                            <div class="ring" id="ringPace"><div><strong id="ringPaceValue">--</strong><small>/100</small></div></div>
+                            <span>Pace</span>
+                        </div>
+                        <div class="factor-card">
+                            <div class="ring" id="ringVolume"><div><strong id="ringVolumeValue">--</strong><small>/100</small></div></div>
+                            <span>Volume</span>
+                        </div>
+                        <div class="factor-card">
+                            <div class="ring" id="ringPausing"><div><strong id="ringPausingValue">--</strong><small>/100</small></div></div>
+                            <span>Pausing</span>
+                        </div>
+                        <div class="factor-card">
+                            <div class="ring" id="ringFiller"><div><strong id="ringFillerValue">--</strong><small>/100</small></div></div>
+                            <span>Filler Control</span>
+                        </div>
+                        <div class="factor-card">
+                            <div class="ring" id="ringRepetition"><div><strong id="ringRepetitionValue">--</strong><small>/100</small></div></div>
+                            <span>Repetition</span>
+                        </div>
+                        <div class="factor-card">
+                            <div class="ring" id="ringOverall"><div><strong id="ringOverallValue">--</strong><small>/100</small></div></div>
+                            <span>Overall</span>
+                        </div>
+                    </div>
+
+                    <div class="score-legend">
+                        <span><i class="dot red"></i>Needs improvement &lt;30</span>
+                        <span><i class="dot yellow"></i>Developing 30–80</span>
+                        <span><i class="dot green"></i>Strong &gt;80</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel analysis-box feedback-panel">
+                <p class="eyebrow">ACTIONABLE FEEDBACK</p>
+                <h3>What you can improve</h3>
+                <div id="feedback"></div>
+            </div>
+        </section>
+    </main>
+
+    <footer>Speech Coach • Multimodal AI Hackathon 2026</footer>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
