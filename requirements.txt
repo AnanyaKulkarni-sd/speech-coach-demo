@@ -1,3 +1,5 @@
-streamlit>=1.36.0
-# Optional real audio transcription:
-faster-whisper>=1.0.0
+Flask
+Werkzeug
+faster-whisper
+av
+numpy
