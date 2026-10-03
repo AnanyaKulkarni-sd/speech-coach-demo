@@ -1,5 +1,6 @@
 Flask
 Werkzeug
 faster-whisper
-av
+av<19
 numpy
+gunicorn
