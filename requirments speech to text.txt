@@ -1,0 +1,4 @@
+   faster-whisper
+   av<17
+   SpeechRecognition
+   pyaudio
